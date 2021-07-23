@@ -1,44 +1,20 @@
-CFILES=xcwd.c
-CC=gcc
-CFLAGS=-Wall -Wextra -std=gnu99 -O2
-LDFLAGS=-lX11
-EXE=xcwd
-prefix=/usr
-UNAME:=$(shell uname)
-O=${CFILES:.c=.o}
+PREFIX = /usr/local
 
-.PHONY: all clean distclean install
-.SUFFIXES: .c .o
+CC = gcc
+CFLAGS = -O3 -Wall -Wextra
 
-ifeq ($(UNAME), Linux)
-    CFLAGS += -DLINUX
-else ifeq ($(UNAME), FreeBSD)
-    CFLAGS += -I/usr/local/include/ -DFREEBSD
-    LDFLAGS += -L/usr/local/lib -lutil
-else ifeq ($(UNAME), OpenBSD)
-    CC=cc
-    CFLAGS += -I /usr/X11R6/include -DOPENBSD
-    LDFLAGS +=-L /usr/X11R6/lib
-else
-   $(error Operating System not supported.)
-endif
-
-all: ${EXE}
+xcwd: xcwd.c
+	${CC} -o $@ ${CFLAGS} `pkg-config --cflags x11` xcwd.c `pkg-config --libs x11`
 
 clean:
-	rm -vf *.o
+	rm -f xcwd
 
-distclean: clean
-	rm -vf ${EXE}
+install: xcwd
+	mkdir -p ${DESTDIR}${PREFIX}/bin
+	cp -f clipdaemon ${DESTDIR}${PREFIX}/bin/xcwd
+	chmod 755 ${DESTDIR}${PREFIX}/bin/xcwd
 
-install: ${EXE}
-	install -m 0755 ${EXE} $(prefix)/bin
+uninstall:
+	rm -f ${DESTDIR}${PREFIX}/bin/xcwd
 
-
-${EXE}: ${O}
-	${CC} -o $@ ${O} ${CFLAGS} ${LDFLAGS}
-
-
-.c.o:
-	${CC} -c $< ${CFLAGS}
-
+.PHONY: clean install uninstall

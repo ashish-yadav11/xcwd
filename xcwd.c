@@ -1,380 +1,260 @@
-/* This is xcwd written by Adrien Schildknecht (c) 2013
- * Email: adrien+dev@schischi.me
- * Feel free to copy and redistribute in terms of the
- * BSD license
- */
-
-#include <limits.h>
-#include <stdlib.h>
+#include <glob.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 
-#ifdef LINUX
-# include <sys/stat.h>
-# include <glob.h>
-#endif
+#define DEBUG                           1
 
-#if defined(FREEBSD) || defined(OPENBSD)
-# include <sys/sysctl.h>
-# include <sys/user.h>
-#endif
-#ifdef FREEBSD
-# include <libutil.h>
-#endif
+#define NAMELEN                         32
 
-#define DEBUG 0
+#define LOG(fmt, ...)                   do { if (DEBUG) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
 
-#define XA_STRING   (XInternAtom(dpy, "STRING", 0))
-#define XA_CARDINAL (XInternAtom(dpy, "CARDINAL", 0))
-#define XA_WM_STATE (XInternAtom(dpy, "WM_STATE", 0))
+#define STR_HELPER(X)                   #X
+#define STR(X)                          STR_HELPER(X)
 
-#define LOG(fmt, ...) \
-    do { if (DEBUG) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
+#define XA_CARDINAL                     (XInternAtom(dpy, "CARDINAL", False))
+#define XA_STRING                       (XInternAtom(dpy, "STRING", False))
+#define XA_WM_CLASS                     (XInternAtom(dpy, "WM_CLASS", False))
+#define XA_NET_WM_PID                   (XInternAtom(dpy, "_NET_WM_PID", False))
+
+typedef struct {
+        char name[NAMELEN];
+        long pid;
+        long ppid;
+} Process;
+
+typedef struct {
+        size_t n;
+        Process *ps;
+} Processes;
+
+static int deepestchildcwd(Processes *p, pid_t pid);
+static Window focusedwin();
+static void freeprocesses(Processes *p);
+static Processes *getprocesses();
+static int namecmp(const void *p1, const void *p2);
+static int ppidcmp(const void *p1, const void *p2);
+static int printcwd(Process *ps);
+static pid_t winpid(Window win);
 
 Display *dpy;
 
-typedef struct processes_s *processes_t;
-struct processes_s {
-    struct proc_s {
-        long pid;
-        long ppid;
-        char name[32];
-#if defined(FREEBSD)
-        char cwd[PATH_MAX];
-#endif
-    } *ps;
-    size_t n;
-};
-
-int nameCmp(const void *p1, const void *p2)
+int
+deepestchildcwd(Processes *p, pid_t pid)
 {
-    return strcasecmp(((struct proc_s *)p1)->name,
-            ((struct proc_s *)p2)->name);
-}
+        int i;
+        Process key = { .pid = pid, .ppid = pid };
+        Process *res = NULL, *fres = NULL;
 
-int ppidCmp(const void *p1, const void *p2)
-{
-    return ((struct proc_s *)p1)->ppid - ((struct proc_s *)p2)->ppid;
-}
-
-static Window focusedWindow()
-{
-    Atom type;
-    Window focuswin, root, *children;
-    int format, status;
-    unsigned long nitems, after;
-    unsigned int nchildren;
-    unsigned char *data;
-
-    dpy = XOpenDisplay (NULL);
-    if (!dpy)
-        exit(EXIT_FAILURE);
-    XGetInputFocus (dpy, &focuswin, (int[1]){});
-    root = XDefaultRootWindow(dpy);
-    if(root == focuswin)
-        return None;
-
-    do {
-        status = XGetWindowProperty(dpy, focuswin, XA_WM_STATE, 0, 1024, 0,
-                XA_WM_STATE, &type, &format, &nitems, &after, &data);
-        if (status == Success) {
-            if (data) {
-                XFree(data);
-                LOG("Window ID = %lu\n", focuswin);
-                return focuswin;
-            }
-        }
-        else
-            return 0;
-        XQueryTree(dpy, focuswin, &root, &focuswin, &children, &nchildren);
-        LOG("%s", "Current window does not have WM_STATE, getting parent\n");
-    } while(focuswin != root);
-
-    return 0;
-}
-
-static long windowPid(Window focuswin)
-{
-    Atom nameAtom = XInternAtom(dpy, "_NET_WM_PID", 1);
-    Atom type;
-    int format, status;
-    long pid = -1;
-    unsigned long nitems, after;
-    unsigned char *data;
-
-    status = XGetWindowProperty(dpy, focuswin, nameAtom, 0, 1024, 0,
-            XA_CARDINAL, &type, &format, &nitems, &after, &data);
-    if (status == Success && data) {
-        pid = *((long*)data);
-        XFree(data);
-        LOG("_NET_WM_PID = %lu\n", pid);
-    }
-    else
-        LOG("%s", "_NET_WM_PID not found\n");
-    return pid;
-}
-
-static char* windowStrings(Window focuswin, long unsigned int *size, char* hint)
-{
-    Atom nameAtom = XInternAtom(dpy, hint, 1);
-    Atom type;
-    int format;
-    unsigned int i;
-    unsigned long after;
-    unsigned char *data = 0;
-    char *ret = NULL;
-
-    if (XGetWindowProperty(dpy, focuswin, nameAtom, 0, 1024, 0, AnyPropertyType,
-                &type, &format, size, &after, &data) == Success) {
-        if (data) {
-            if (type == XA_STRING) {
-                ret = malloc(sizeof(char) * *size);
-                LOG("%s = ", hint);
-                for (i = 0; i < *size; ++i) {
-                    LOG("%c", data[i] == 0 ? ' ' : data[i]);
-                    ret[i] = data[i];
+        do {
+                if (res) {
+                        fres = res;
+                        key.ppid = res->pid;
                 }
-                LOG("%s", "\n");
-            }
-            XFree(data);
-        }
-        else
-            LOG("%s not found\n", hint);
-    }
-    return ret;
-}
+                res = (Process *)bsearch(&key, p->ps, p->n, sizeof(Process), ppidcmp);
+        } while (res);
 
-static void freeProcesses(processes_t p)
-{
-    free(p->ps);
-    free(p);
-}
-
-static processes_t getProcesses(void)
-{
-    processes_t p = NULL;
-#ifdef LINUX
-    glob_t globbuf;
-    unsigned int i, j, k;
-    char line[201] = {0};
-
-    glob("/proc/[0-9]*", GLOB_NOSORT, NULL, &globbuf);
-    p = malloc(sizeof(struct processes_s));
-    p->ps = malloc(globbuf.gl_pathc * sizeof(struct proc_s));
-
-    LOG("Found %zu processes\n", globbuf.gl_pathc);
-    for (i = j = 0; i < globbuf.gl_pathc; i++) {
-        char name[32];
-        FILE *tn;
-
-        (void)globbuf.gl_pathv[globbuf.gl_pathc - i - 1];
-        snprintf(name, sizeof(name), "%s%s",
-                globbuf.gl_pathv[globbuf.gl_pathc - i - 1], "/stat");
-        tn = fopen(name, "r");
-        if (tn == NULL)
-            continue;
-        fread(line, 200, 1, tn);
-        p->ps[j].pid = atoi(strtok(line, " "));
-        k = snprintf(p->ps[j].name, 32, "%s", strtok(NULL, " ") + 1);
-        p->ps[j].name[k - 1] = 0;
-        strtok(NULL, " "); // discard process state
-        p->ps[j].ppid = atoi(strtok(NULL, " "));
-        LOG("\t%-20s\tpid=%6ld\tppid=%6ld\n", p->ps[j].name, p->ps[j].pid,
-                p->ps[j].ppid);
-        fclose(tn);
-        j++;
-    }
-    p->n = j;
-    globfree(&globbuf);
-#endif
-#ifdef FREEBSD
-    unsigned int count;
-    p = malloc(sizeof(struct processes_s));
-    struct kinfo_proc *kp;
-    size_t len = 0;
-    int name[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PROC, 0 };
-    sysctl(name, 4, NULL, &len, NULL, 0);
-    kp = malloc(len);
-    sysctl(name, 4, kp, &len, NULL, 0);
-    count = len / sizeof(*kp);
-    p->ps = calloc(count, sizeof(struct proc_s));
-    p->n = count;
-
-    unsigned int i;
-    for(i = 0; i < count; ++i) {
-        struct kinfo_file *files, *kif;
-        int cnt, j;
-        if(kp[i].ki_fd == NULL || kp[i].ki_pid == 0)
-            continue;
-        files = kinfo_getfile(kp[i].ki_pid, &cnt);
-        for(j = 0; j < cnt; ++j) {
-            kif = &files[j];
-            if(kif->kf_fd != KF_FD_TYPE_CWD)
-                continue;
-            p->ps[i].pid = kp[i].ki_pid;
-            p->ps[i].ppid = kp[i].ki_ppid;
-            strncpy(p->ps[i].name, kp[i].ki_tdname, 32);
-            strncpy(p->ps[i].cwd, kif->kf_path, MAXPATHLEN);
-            LOG("\t%-20s\tpid=%6ld\tppid=%6ld\n", p->ps[i].name, p->ps[i].pid,
-                p->ps[i].ppid);
-        }
-
-    }
-    free(kp);
-#endif
-#ifdef OPENBSD
-    unsigned int count;
-    p = malloc(sizeof(struct processes_s));
-    struct kinfo_proc *kp;
-    size_t len = 0;
-    int name[6] = { CTL_KERN, KERN_PROC, KERN_PROC_UID, getuid(), sizeof(struct kinfo_proc), 0 };
-    sysctl(name, 6, NULL, &len, NULL, 0);
-    len += len/8; // some headroom
-    kp = malloc(len);
-    name[5] = len / sizeof(struct kinfo_proc);
-    sysctl(name, 6, kp, &len, NULL, 0);
-    count = len / sizeof(*kp);
-    p->ps = calloc(count, sizeof(struct proc_s));
-    p->n = count;
-
-    unsigned int i;
-    for(i = 0; i < count; ++i) {
-        struct kinfo_proc *kip = &kp[i];
-        p->ps[i].pid = kip->p_pid;
-        p->ps[i].ppid = kip->p_ppid;
-        strlcpy(p->ps[i].name, kip->p_comm, sizeof(p->ps[i].name));
-        LOG("\t%-20s\tpid=%6ld\tppid=%6ld\n", p->ps[i].name, p->ps[i].pid,
-                p->ps[i].ppid);
-    }
-    free(kp);
-#endif
-    return p;
-}
-
-static int readPath(struct proc_s *proc)
-{
-#ifdef LINUX
-    char buf[255];
-    char path[64];
-    ssize_t len;
-
-    snprintf(path, sizeof(path), "/proc/%ld/cwd", proc->pid);
-    if ((len = readlink(path, buf, 255)) != -1)
-        buf[len] = '\0';
-    if(len <= 0) {
-        LOG("Error readlink %s\n", path);
+        if (!fres)
+                return printcwd(&key);
+        for (i = 0; fres != p->ps && (fres - i)->ppid == fres->ppid; i++)
+                if (printcwd(fres - i))
+                        return 1;
+        for (i = 1; fres != p->ps + p->n && (fres + i)->ppid == fres->ppid; i++)
+                if (printcwd(fres + i))
+                        return 1;
         return 0;
-    }
-    LOG("Read %s\n", path);
-    if(access(buf, F_OK))
-        return 0;
-    fprintf(stdout, "%s\n", buf);
-#endif
-#if defined(FREEBSD)
-    if(!strlen(proc->cwd)) {
-        LOG("%ld cwd is empty\n", proc->pid);
-        return 0;
-    }
-    if(access(proc->cwd, F_OK))
-        return 0;
-    fprintf(stdout, "%s\n", proc->cwd);
-#endif
-#if defined(OPENBSD)
-    char cwd[PATH_MAX];
-    int name[3] = { CTL_KERN, KERN_PROC_CWD, proc->pid };
-    size_t len = sizeof(cwd);
-    if (sysctl(name, 3, cwd, &len, NULL, 0) == 0) {
-        if(access(cwd, F_OK))
-             return 0;
-    } else
-	return 0;
-    fprintf(stdout, "%s\n", cwd);
-#endif
-    return 1;
 }
 
-static int cwdOfDeepestChild(processes_t p, long pid)
+Window
+focusedwin()
 {
-    int i;
-    struct proc_s key = { .pid = pid, .ppid = pid},
-                  *res = NULL, *lastRes = NULL;
+        int di;
+        unsigned int du;
+        Window win, winr, winp;
+        Window *winc;
 
-    do {
-        if(res) {
-            lastRes = res;
-            key.ppid = res->pid;
+        if (!(dpy = XOpenDisplay(NULL))) {
+                fputs("Error: could not open display.\n", stderr);
+                exit(1);
         }
-        res = (struct proc_s *)bsearch(&key, p->ps, p->n,
-                sizeof(struct proc_s), ppidCmp);
-    } while(res);
-
-    if(!lastRes) {
-        return readPath(&key);
-    }
-
-    for(i = 0; lastRes != p->ps && (lastRes - i)->ppid == lastRes->ppid; ++i)
-        if(readPath((lastRes - i)))
-            return 1;
-    for(i = 1; lastRes != p->ps + p->n && (lastRes + i)->ppid == lastRes->ppid; ++i)
-        if(readPath((lastRes + i)))
-            return 1;
-    return 0;
+        XGetInputFocus(dpy, &win, &di);
+        if (win == DefaultRootWindow(dpy))
+                return None;
+        while (XQueryTree(dpy, win, &winr, &winp, &winc, &du) && winp != winr)
+                win = winp;
+        if (winc)
+                XFree(winc);
+        LOG("focusedwin: window id = %lu\n", win);
+        return win;
 }
 
-int getHomeDirectory()
+void
+freeprocesses(Processes *p)
 {
-    LOG("%s", "getenv $HOME...\n");
-    fprintf(stdout, "%s\n", getenv("HOME"));
-    return EXIT_FAILURE;
+        free(p->ps);
+        free(p);
 }
 
-int main(int argc, const char *argv[])
+Processes *
+getprocesses()
 {
-    (void)argc;
-    (void)argv;
+        Processes *p = NULL;
+        glob_t globbuf;
+        unsigned int i, j;
+        int r;
+        char line[256];
 
-    processes_t p;
-    long pid;
-    int ret = EXIT_SUCCESS;
-    Window w = focusedWindow();
-    if (w == None)
-        return getHomeDirectory();
+        glob("/proc/[0-9]*", GLOB_NOSORT, NULL, &globbuf);
+        p = malloc(sizeof(Processes));
+        p->ps = malloc(globbuf.gl_pathc * sizeof(Process));
 
-    pid = windowPid(w);
-    p = getProcesses();
-    if(!p)
-        return getHomeDirectory();
-    if(pid != -1)
-        qsort(p->ps, p->n, sizeof(struct proc_s), ppidCmp);
-    else {
-        long unsigned int size;
-        unsigned int i;
-        char* strings;
-        struct proc_s *res = NULL, key;
+        LOG("%s", "getprocesses:\n");
+        for (i = j = 0; i < globbuf.gl_pathc; i++) {
+                char name[32];
+                FILE *f;
 
-        qsort(p->ps, p->n, sizeof(struct proc_s), nameCmp);
-        strings = windowStrings(w, &size, "WM_CLASS");
-        for(i = 0; i < size; i += strlen(strings + i) + 1) {
-            LOG("pidof %s\n", strings + i);
-            strcpy(key.name, strings + i);
-            res = (struct proc_s *)bsearch(&key, p->ps, p->n,
-                    sizeof(struct proc_s), nameCmp);
-            if(res)
-                break;
+                snprintf(name, sizeof name , "%s%s",
+                         globbuf.gl_pathv[globbuf.gl_pathc - i - 1], "/stat");
+                if (!(f = fopen(name, "r")))
+                        continue;
+                fgets(line, sizeof line, f);
+                p->ps[j].pid = atol(strtok(line, " "));
+                r = snprintf(p->ps[j].name, NAMELEN, "%s", strtok(NULL, " ") + 1);
+                if (r < NAMELEN)
+                        p->ps[j].name[r - 1] = '\0';
+                strtok(NULL, " "); /* discard process state */
+                p->ps[j].ppid = atol(strtok(NULL, " "));
+                LOG("\t%-" STR(NAMELEN) "s\tpid = %6ld\tppid = %6ld\n", p->ps[j].name,
+                    (long)p->ps[j].pid, (long)p->ps[j].ppid);
+                fclose(f);
+                j++;
         }
-        if (res) {
-            pid = res->pid;
-            LOG("Found %s (%ld)\n", res->name, res->pid);
-        }
-        if (size)
-            free(strings);
-    }
-    if (pid == -1 || !cwdOfDeepestChild(p, pid))
-        ret = getHomeDirectory();
-    freeProcesses(p);
-    return ret;
+        p->n = j;
+        globfree(&globbuf);
+        return p;
 }
 
+int
+namecmp(const void *p1, const void *p2)
+{
+        return strcasecmp(((Process *)p1)->name, ((Process *)p2)->name);
+}
+
+int
+ppidcmp(const void *p1, const void *p2)
+{
+        return ((Process *)p1)->ppid - ((Process *)p2)->ppid;
+}
+
+int
+printcwd(Process *ps)
+{
+        char path[32];
+        char *cwd;
+        ssize_t rd, sz = 256;
+	struct stat buf;
+
+        snprintf(path, sizeof path , "/proc/%ld/cwd", (long)ps->pid);
+
+        for(cwd = NULL; ; sz *= 2) {
+                cwd = realloc(cwd, sz);
+                rd = readlink(path, cwd, sz);
+                if (rd == -1) {
+                        LOG("printcwd: readlink %s failed\n", path);
+                        free(cwd);
+                        return 0;
+                } else if (rd < sz)
+                        break;
+                sz *= 2;
+        }
+        cwd[rd] = '\0';
+	if (stat(cwd, &buf) == -1 || !S_ISDIR(buf.st_mode)) {
+		LOG("printcwd: %s is not a directory\n", cwd);
+                free(cwd);
+		return 0;
+	}
+        fprintf(stdout, "%s\n", cwd);
+        free(cwd);
+        return 1;
+}
+
+pid_t
+winpid(Window win)
+{
+        int di;
+        unsigned long dl;
+        unsigned char *p;
+        Atom da;
+        pid_t pid = -1;
+
+        if (XGetWindowProperty(dpy, win, XA_NET_WM_PID, 0L, 1L, False, XA_CARDINAL,
+                               &da, &di, &dl, &dl, &p) == Success && p) {
+                pid = *(pid_t *)p;
+                XFree(p);
+                LOG("winpid: _NET_WM_PID = %ld\n", (long)pid);
+        } else
+                LOG("%s", "winpid: _NET_WM_PID not found\n");
+        return pid;
+}
+
+int
+main()
+{
+        Window win;
+        pid_t pid;
+        Processes *p = NULL;
+
+        if ((win = focusedwin()) == None)
+                goto home;
+        pid = winpid(win);
+        if (!(p = getprocesses()))
+                goto home;
+        if (pid != -1)
+                qsort(p->ps, p->n, sizeof(Process), ppidcmp);
+        else {
+                Process *res = NULL, key;
+                XClassHint ch = { NULL, NULL };
+
+                qsort(p->ps, p->n, sizeof(Process), namecmp);
+                XGetClassHint(dpy, win, &ch);
+                if (ch.res_name) {
+                        LOG("main: pidof %s\n", ch.res_name);
+                        strncpy(key.name, ch.res_name, sizeof key.name - 1);
+                        key.name[sizeof key.name - 1] = '\0';
+                        XFree(ch.res_name);
+                        if ((res = (Process *)bsearch(&key, p->ps, p->n, sizeof(Process), namecmp))) {
+                                if (ch.res_class)
+                                        XFree(ch.res_class);
+                                goto found;
+                        }
+                }
+                if (ch.res_class) {
+                        LOG("main: pidof %s\n", ch.res_class);
+                        strncpy(key.name, ch.res_class, sizeof key.name - 1);
+                        key.name[sizeof key.name - 1] = '\0';
+                        XFree(ch.res_class);
+                        if ((res = (Process *)bsearch(&key, p->ps, p->n, sizeof(Process), namecmp)))
+                                goto found;
+                }
+                goto out;
+found:
+                pid = res->pid;
+                LOG("main: found %s (%ld)\n", res->name, (long)res->pid);
+        }
+out:
+        XCloseDisplay(dpy);
+        if (pid == -1 || !deepestchildcwd(p, pid))
+                goto home;
+        freeprocesses(p);
+        return 0;
+home:
+        freeprocesses(p);
+        LOG("%s", "main: falling back to home\n");
+        printf("%s\n", getenv("HOME"));
+        return 2;
+}
