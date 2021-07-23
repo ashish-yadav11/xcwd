@@ -8,8 +8,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
-#define DEBUG                           1
-
+#define DEBUG                           0
 #define NAMELEN                         32
 
 #define LOG(fmt, ...)                   do { if (DEBUG) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
