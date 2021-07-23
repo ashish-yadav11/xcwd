@@ -11,7 +11,7 @@ clean:
 
 install: xcwd
 	mkdir -p ${DESTDIR}${PREFIX}/bin
-	cp -f clipdaemon ${DESTDIR}${PREFIX}/bin/xcwd
+	cp -f xcwd ${DESTDIR}${PREFIX}/bin/xcwd
 	chmod 755 ${DESTDIR}${PREFIX}/bin/xcwd
 
 uninstall:
