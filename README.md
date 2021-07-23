@@ -1,3 +1,6 @@
+My fork of xcwd - cleaned up code and did some improvements. Only works in
+Linux.
+
 xcwd - X current working directory
 ==================================
 xcwd is a simple tool that prints the current working directory of the
@@ -40,15 +43,14 @@ If one of these steps fail, xcwd prints the content of the `$HOME` variable.
 
 Requirements
 ------------
-  - Linux, FreeBSD or OpenBSD
-  - libX11-dev
+  - Linux
+  - libX11
 
 Installation
 ------------
-* Clone this repository or [download as ZIP](https://github.com/schischi/xcwd/archive/master.zip)
+* Clone this repository
 * `make`
-* `make install`
-Use `gmake` on OpenBSD.
+* `sudo make install`
 
 Running xwcd
 ------------
