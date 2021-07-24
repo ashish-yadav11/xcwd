@@ -24,14 +24,14 @@
 #define XA_NET_WM_PID                   (XInternAtom(dpy, "_NET_WM_PID", False))
 
 typedef struct {
-        char name[NAMELEN];
         long pid;
+        char name[NAMELEN];
         long ppid;
 } Process;
 
 typedef struct {
-        size_t n;
         Process *ps;
+        size_t n;
 } Processes;
 
 static int deepestchildcwd(Processes *p, long pid);
@@ -113,7 +113,7 @@ getprocesses(int onlytty)
         p = malloc(sizeof(Processes));
         p->ps = malloc(globbuf.gl_pathc * sizeof(Process));
 
-        for (i = j = 0; i < globbuf.gl_pathc; i++, j++) {
+        for (i = j = 0; i < globbuf.gl_pathc; i++) {
                 char d;
                 char path[32], line[64];
                 char *fb, *lb;
@@ -146,6 +146,7 @@ getprocesses(int onlytty)
                 p->ps[j].ppid = atol(lb + 4);
                 LOG("getprocesses: %" STR(NAMELEN) "s, pid = %6ld, ppid = %6ld\n",
                                 p->ps[j].name, p->ps[j].pid, p->ps[j].ppid);
+                j++;
         }
         p->n = j;
         globfree(&globbuf);
