@@ -53,7 +53,7 @@ Installation
 Usage
 -----
 * `xcwd [-h|--help]`
-* `xcwd [-p|--physical] [-l|--logical] [-a|--all] [-t|--tty-only]`
+* `xcwd [-a|--all|-t|--tty-only]`
 
 Examples:
 * `urxvt -cd "$(xcwd)"`
