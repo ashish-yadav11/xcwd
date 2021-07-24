@@ -14,6 +14,7 @@
 #define STR(X)                          STR_HELPER(X)
 
 #define DEVPTS                          "/dev/pts"
+#define PWD                             "PWD="
 
 #define XA_CARDINAL                     (XInternAtom(dpy, "CARDINAL", False))
 #define XA_WM_PID                       (XInternAtom(dpy, "_NET_WM_PID", False))
@@ -31,12 +32,16 @@ typedef struct {
 static void cleanup(Processes *p);
 static int deepestchildcwd(Processes *p, long pid);
 static Window focusedwin();
-static Processes *getprocesses(int onlytty);
+static Processes *getprocesses();
 static int istty(long pid);
 static int ppidcmp(const void *p1, const void *p2);
 static int printcwd(Process *ps);
+static int printlcwd(long pid);
+static int printpcwd(long pid);
 static long winpid(Window win);
 
+int logical = 0;
+int ttyonly = 0;
 Display *dpy;
 
 void
@@ -97,7 +102,7 @@ focusedwin()
 }
 
 Processes *
-getprocesses(int onlytty)
+getprocesses()
 {
         unsigned int i, j;
         glob_t globbuf;
@@ -127,7 +132,7 @@ getprocesses(int onlytty)
                 }
                 fclose(fp);
                 p->ps[j].pid = atol(line);
-                if (onlytty && !istty(p->ps[j].pid)) {
+                if (ttyonly && !istty(p->ps[j].pid)) {
                         LOG("getprocesses: skipping %ld, not a tty process\n",
                                         p->ps[j].pid);
                         continue;
@@ -168,18 +173,58 @@ ppidcmp(const void *p1, const void *p2)
 int
 printcwd(Process *ps)
 {
+        if (!logical || !printlcwd(ps->pid))
+                return printpcwd(ps->pid);
+        return 1;
+}
+
+int
+printlcwd(long pid)
+{
+        char path[64];
+        char *c;
+        char *line = NULL;
+        size_t d;
+        ssize_t rd;
+        FILE *fp;
+
+        snprintf(path, sizeof path , "/proc/%ld/environ", pid);
+        if (!(fp = fopen(path, "r"))) {
+                LOG("printlcwd: reading %s failed\n", path);
+                return 0;
+        }
+        if ((rd = getline(&line, &d, fp)) == -1) {
+                free(line);
+                LOG("printlcwd: getline failed on %s\n", path);
+                return 0;
+        }
+        c = line;
+        while (strncmp(c, PWD, sizeof PWD - 1) != 0) {
+                c = strchr(c, '\0');
+                if (c - line >= rd)
+                        return 0;
+                c++;
+        }
+        printf("%s\n", c + sizeof PWD - 1);
+        free(line);
+        return 1;
+}
+
+int
+printpcwd(long pid)
+{
         char path[32];
         char *cwd;
         ssize_t rd, sz = 256;
         struct stat buf;
 
-        snprintf(path, sizeof path , "/proc/%ld/cwd", ps->pid);
+        snprintf(path, sizeof path , "/proc/%ld/cwd", pid);
 
         for(cwd = NULL; ; sz *= 2) {
                 cwd = realloc(cwd, sz);
                 rd = readlink(path, cwd, sz);
                 if (rd == -1) {
-                        LOG("printcwd: readlink %s failed\n", path);
+                        LOG("printpcwd: readlink %s failed\n", path);
                         free(cwd);
                         return 0;
                 } else if (rd < sz)
@@ -188,11 +233,11 @@ printcwd(Process *ps)
         }
         cwd[rd] = '\0';
         if (stat(cwd, &buf) == -1 || !S_ISDIR(buf.st_mode)) {
-                LOG("printcwd: %s is not a directory\n", cwd);
+                LOG("printpcwd: %s is not a directory\n", cwd);
                 free(cwd);
                 return 0;
         }
-        fprintf(stdout, "%s\n", cwd);
+        printf("%s\n", cwd);
         free(cwd);
         return 1;
 }
@@ -219,25 +264,34 @@ winpid(Window win)
 int
 main(int argc, char *argv[])
 {
-        int onlytty = 0;
-        Window win;
         long pid;
+        Window win;
         Processes *p = NULL;
 
-        if (argc > 1) {
+        if (argc == 2)
                 if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
-                        printf("Usage: %s [-h|--help|-t|--only-tty]\n", argv[0]);
+                        printf("Usage:\n"
+                               "	%1$s [-h|--help]\n"
+                               "	%1$s [-p|--physical] [-l|--logical]"
+                                           " [-a|--all] [-t|--tty-only]\n", argv[0]);
                         return 0;
                 }
-                if (strcmp(argv[1], "-t") == 0 || strcmp(argv[1], "--only-tty") == 0)
-                        onlytty = 1;
+        while (argc > 1) {
+                if (strcmp(argv[1], "-l") == 0 || strcmp(argv[1], "--logical") == 0)
+                        logical = 1;
+                else if (strcmp(argv[1], "-t") == 0 || strcmp(argv[1], "--tty-only") == 0)
+                        ttyonly = 1;
+                else if (strcmp(argv[1], "-p") == 0 || strcmp(argv[1], "--physical") == 0)
+                        logical = 0;
+                else if (strcmp(argv[1], "-a") == 0 || strcmp(argv[1], "--all") == 0)
+                        ttyonly = 0;
+                argc--, argv++;
         }
-
         if ((win = focusedwin()) == None)
                 goto home;
         if ((pid = winpid(win)) == -1)
                 goto home;
-        if (!(p = getprocesses(onlytty)))
+        if (!(p = getprocesses()))
                 goto home;
         qsort(p->ps, p->n, sizeof(Process), ppidcmp);
         if (pid == -1 || !deepestchildcwd(p, pid))
