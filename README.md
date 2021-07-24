@@ -21,7 +21,7 @@ application" nor terminal multiplexer, e.g.:
   - lilyterm
   - konsole
   - urxvtc with urxvtd
-  - applications with tabs
+  - programs with tabs
 
 The application works with the following terminals:
   - urxvt
@@ -31,12 +31,10 @@ The application works with the following terminals:
 
 How it works
 ------------
-  - Get the handle of the focused window;
-  - Try to get the PID of the program using the window's attributes:
-     - If `_NET_WM_PID` is set, xcwd just reads the value;
-     - Otherwise it reads the `_NET_WM_CLASS` and compares it to the name of
-       all the running processes;
-  - Find the deepest child process;
+  - Get the handle of the focused window.
+  - Try to get the PID of the process using the window's `_NET_WM_PID`
+  - attributes.
+  - Find the deepest child process.
   - Print the working directory of this process to stdout.
 
 If one of these steps fail, xcwd prints the content of the `$HOME` variable.
@@ -52,27 +50,12 @@ Installation
 * `make`
 * `sudo make install`
 
-Running xwcd
-------------
-Simply invoke the 'xcwd' command.
+Usage
+-----
+* `xcwd [-h|--help|-t|--only-tty]`
 
 Examples:
-* ``urxvt -cd "`xcwd`" ``
-* ``xterm -e "cd `xcwd` && /bin/zsh"``
-* ``gnome-terminal --working-directory="`xcwd`"``
-* ``pcmanfm "`xcwd`" ``
-
-i3 Configuration
-----------------
-* bindsym $mod+Shift+Return exec ``urxvt -cd "`xcwd`" ``
-* bindsym $mod+Shift+Return exec ``cd "$(xcwd)" && exec xterm``
-* bindsym $mod+Shift+Return exec ``gnome-terminal --working-directory="`xcwd`"``
-* bindsym $mod+p            exec ``pcmanfm "`xcwd`"``
-
-
-Awesome WM Configuration
-------------------------
-```lua
-awful.key({ modkey, "Shift" }, "Return", function () awful.util.spawn("sh -c 'termite -d \"$(xcwd)\"'") end,
-          {description = "open a terminal on current path", group = "launcher"}),
-```
+* `urxvt -cd "$(xcwd)"`
+* `xterm -e 'cd "$(xcwd)" && "$(SHELL)"'`
+* `gnome-terminal --working-directory="$(xcwd)"`
+* `pcmanfm "$(xcwd)"`
