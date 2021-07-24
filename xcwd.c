@@ -129,11 +129,8 @@ getprocesses(int ttyonly)
                 }
                 fclose(fp);
                 p->ps[j].pid = atol(line);
-                if (ttyonly && !istty(p->ps[j].pid)) {
-                        LOG("getprocesses: skipping %ld, not a tty process\n",
-                                        p->ps[j].pid);
+                if (ttyonly && !istty(p->ps[j].pid))
                         continue;
-                }
                 b = strrchr(line, ')');
                 p->ps[j].ppid = atol(b + 4);
                 LOG("getprocesses: found pid = %6ld, ppid = %6ld\n",
@@ -154,10 +151,8 @@ istty(long pid)
 
         snprintf(path, sizeof path , "/proc/%ld/fd/0", pid);
 
-        if ((rd = readlink(path, fd0, sizeof fd0)) == -1) {
-                LOG("istty: readlink %s failed\n", path);
+        if ((rd = readlink(path, fd0, sizeof fd0)) == -1)
                 return 0;
-        }
         return !strncmp(fd0, DEVPTS, sizeof fd0);
 }
 
