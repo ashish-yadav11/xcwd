@@ -187,6 +187,7 @@ printlcwd(long pid)
         size_t d;
         ssize_t rd;
         FILE *fp;
+        struct stat buf;
 
         snprintf(path, sizeof path , "/proc/%ld/environ", pid);
         if (!(fp = fopen(path, "r"))) {
@@ -194,18 +195,28 @@ printlcwd(long pid)
                 return 0;
         }
         if ((rd = getline(&line, &d, fp)) == -1) {
+                fclose(fp);
                 free(line);
                 LOG("printlcwd: getline failed on %s\n", path);
                 return 0;
         }
+        fclose(fp);
         c = line;
         while (strncmp(c, PWD, sizeof PWD - 1) != 0) {
                 c = strchr(c, '\0');
-                if (c - line >= rd)
+                if (c - line >= rd) {
+                        free(line);
                         return 0;
+                }
                 c++;
         }
-        printf("%s\n", c + sizeof PWD - 1);
+        c += sizeof PWD - 1;
+        if (stat(c, &buf) == -1 || !S_ISDIR(buf.st_mode)) {
+                LOG("printlcwd: %s is not a directory\n", c);
+                free(line);
+                return 0;
+        }
+        printf("%s\n", c);
         free(line);
         return 1;
 }
