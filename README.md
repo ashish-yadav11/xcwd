@@ -33,7 +33,7 @@ How it works
 ------------
   - Get the handle of the focused window.
   - Try to get the PID of the process using the window's `_NET_WM_PID`
-  - attributes.
+    attributes.
   - Find the deepest child process.
   - Print the working directory of this process to stdout.
 
