@@ -7,15 +7,11 @@
 #include <X11/Xlib.h>
 
 #define DEBUG                           0
-#define DEFTTYONLY                      0
+#define DEFAULTTTYONLY                  0
 
 #define DEVPTS                          "/dev/pts"
-#define PWD                             "PWD="
 
 #define LOG(fmt, ...)                   do { if (DEBUG) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
-
-#define STR_HELPER(X)                   #X
-#define STR(X)                          STR_HELPER(X)
 
 #define XA_CARDINAL                     (XInternAtom(dpy, "CARDINAL", False))
 #define XA_WM_PID                       (XInternAtom(dpy, "_NET_WM_PID", False))
@@ -216,7 +212,7 @@ winpid(Window win)
 int
 main(int argc, char *argv[])
 {
-        int ttyonly = DEFTTYONLY;
+        int ttyonly = DEFAULTTTYONLY;
         long pid;
         Window win;
         Processes *p = NULL;
