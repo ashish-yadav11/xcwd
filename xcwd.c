@@ -28,7 +28,7 @@ typedef struct {
 
 static void cleanup(Processes *p);
 static int deepestchildcwd(Processes *p, long pid);
-static Window focusedwin();
+static Window focusedwin(void);
 static Processes *getprocesses(int ttyonly);
 static int istty(long pid);
 static int ppidcmp(const void *p1, const void *p2);
@@ -72,7 +72,7 @@ deepestchildcwd(Processes *p, long pid)
 }
 
 Window
-focusedwin()
+focusedwin(void)
 {
         int di;
         unsigned int du;
